@@ -1,0 +1,27 @@
+  
+body {
+    background-color:#d0e4fe;
+}
+caption {
+    text-align:center;
+    vertical-align:middle;
+    font-size:26px;
+    color:green;
+}
+
+td{
+    text-align:center;
+    vertical-align:middle;
+    font-size: 36px;
+    color:green;
+}
+h1 {
+    vertical-align:middle;
+    font-size:56px;
+    color:red;
+    text-align:center;
+}
+p {
+    font-family:"Times New Roman";
+    font-size:40px;
+}
