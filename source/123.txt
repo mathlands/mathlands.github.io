@@ -1,0 +1,321 @@
+
+#    ****************************************************************************用python分析文本数据的词频
+import os
+path='主要业务'  #文件所在文件夹
+files = [path+"\\"+i for i in os.listdir(path)] #获取文件夹下的文件名,并拼接完整路径
+
+import jieba
+import pandas as pd
+
+for file in files:
+
+    txt = open(file, "r", encoding="utf-8").read()
+    words = jieba.lcut(txt)
+    wordsDict = {} #新建字典用于储存词及词频
+    for word in words:
+        if len(word) == 1: #单个的字符不作为词放入字典
+            continue
+        else:
+            wordsDict.setdefault(word, 0) #设置词的初始出现次数为0
+            wordsDict[word] +=1 #对于重复出现的词，每出现一次，次数增加1
+
+    stopWords = ["2019","不断","持续","主要","企业","产品","业务","公司","行业","000","用于","情况","方面","一种","要求","对于","进行","一般","212","实现","处理","通过","投入","随着"]
+    for word in stopWords:
+        if word in wordsDict:
+            del wordsDict[word]
+
+    wordsDict_seq = sorted(wordsDict.items(),key=lambda x:x[1], reverse=True) #按字典的值降序排序
+
+    df = pd.DataFrame(wordsDict_seq,columns=['词','次数'])
+    df.to_excel("词频//{}.xlsx".format(file.split("\\")[1][:-4]),index = False) #存为Excel时去掉index索引列
+
+
+#****************************************************************************获取待处理的年报的路径
+import os
+path='年报'  #文件所在文件夹
+files = [path+"\\"+i for i in os.listdir(path)] #获取文件夹下的文件名,并拼接完整路径
+
+
+import pdfplumber
+import time
+time0= time.time()
+#从字符串中提取指定首尾的文字
+def Get_text(start_str, end_str, source_str):
+    start = source_str.find(start_str) #找到开始关键词对应的位置索引
+    if start >= 0:
+        start += len(start_str)
+        end = source_str.find(end_str, start)#找到结束关键词对应的位置索引
+        if end >= 0:
+            return source_str[start:end].strip() #截取起始位置之间的字符
+
+#定义写入txt的函数
+def To_txt(filename, final_text):#filename为写入文件的路径，data为要写入数据列表.
+    file = open(filename + '.txt','w',encoding="utf-8")
+    file.write(filename + "\n")
+    for i in range(len(final_text)):
+        text = final_text[i]
+        if i != len(final_text)-1: #判断是否最后一个元素
+            text = text+'\n'   #若不是最后一个元素才换行
+        file.write(text)
+    time.sleep(0.1) #加入一个延时，避免批量写入出现乱码
+    file.close()
+
+
+
+    
+#***********************************************获取年报中的“主要业务”信息
+for file in files:
+    data = []
+    key_words = "重大变化情况"
+    with pdfplumber.open(file) as p:
+        for i in range(6,26): #公司主要业务主要年报的在8~23页范围内
+            page = p.pages[i] #选页
+            page_text = page.extract_text() #提取文字
+            data.append(page_text) #将提取的文字加入列表
+            if key_words in page_text: #到结束关键词即结束抓取信息，避免浪费时间
+                break # 终止for循环        
+
+    #将数据列表`data`转换成一个大字符串
+    source_str = "".join(data)
+    #截取文字
+    start_str = "公司业务概要"
+    end_str = "重大变化情况"
+    text_wanted = Get_text(start_str, end_str, source_str)
+    #去掉不需要的尾巴
+    final_text = text_wanted.split("\n")[:-1]
+    new_file = "主要业务\\" + file.split("\\")[1][:-4]
+
+    To_txt(new_file,final_text)
+    print("{} 处理完成！".format(new_file))
+    
+time1= time.time()
+print("处理完成，共用时 {} 秒。".format(time1-time0))
+
+
+#*******************************************************************图形用户界面
+import sys
+import os
+from PyQt5 import QtWidgets
+from PyQt5.QtGui import QIcon
+import xlrd
+import datetime
+import time
+from openpyxl import Workbook
+from openpyxl.styles import Border, Side, PatternFill, Font, GradientFill, Alignment
+
+class MainGUI(QtWidgets.QMainWindow):
+    def __init__(self):
+        super().__init__()        
+        self.setWindowTitle("领料明细汇总")
+        self.resize(800, 400)
+        self.main_widget = QtWidgets.QWidget()        
+        self.main_widget_layout = QtWidgets.QGridLayout()
+        self.main_widget.setLayout(self.main_widget_layout)
+
+        self.input = QtWidgets.QLineEdit()
+        self.input_btn = QtWidgets.QPushButton("选择输入文件夹")
+        self.output = QtWidgets.QLineEdit()
+        self.output_btn = QtWidgets.QPushButton("选择输出文件夹")
+        self.show_result = QtWidgets.QListWidget()
+        self.run = QtWidgets.QPushButton("执行汇总")
+
+        self.main_widget_layout.addWidget(self.input,0,0,1,2)
+        self.main_widget_layout.addWidget(self.input_btn, 0, 2, 1, 1)
+        self.main_widget_layout.addWidget(self.output,1,0,1,2)
+        self.main_widget_layout.addWidget(self.output_btn, 1, 2, 1, 1)
+        self.main_widget_layout.addWidget(self.run, 2, 2, 1, 1)
+        self.main_widget_layout.addWidget(self.show_result, 3, 0, 3, 3)
+
+        self.setCentralWidget(self.main_widget)
+        
+        self.input_btn.clicked.connect(self.Choice_dir_input) #将"选择输入文件夹"按钮绑定Choice_dir_input函数
+        self.output_btn.clicked.connect(self.Choice_dir_output) #将"选择输出文件夹"按钮绑定Choice_dir_output函数
+        self.run.clicked.connect(self.Summary_data) #“执行汇总”按钮绑定Summary_data函数
+
+    def Choice_dir_input(self):
+        #选择目录操作
+        dir_path = QtWidgets.QFileDialog.getExistingDirectory(self, "请选择文件夹路径", "D:\\")
+        #将选择的目录显示在文本编辑框中
+        self.input.setText(dir_path)
+        
+    def Choice_dir_output(self):
+        dir_path = QtWidgets.QFileDialog.getExistingDirectory(self, "请选择文件夹路径", "D:\\")
+        self.output.setText(dir_path)
+        
+    def Get_data(self, file):
+        '''获取单个Excel文件中的资料'''
+        wb = xlrd.open_workbook(file)
+        ws = wb.sheets()[0]
+        data = {}
+        for row in range(7, ws.nrows-2):
+            card_id = ws.cell(2, 16).value
+            car = ws.cell(3, 16).value
+            dt = ws.cell(row, 0).value
+            if type(dt) is float:
+                date_time = xlrd.xldate.xldate_as_datetime(dt, 0)
+            else:
+                date_time = datetime.datetime.strptime(dt,'%Y-%m-%d %H:%M:%S')
+            business = ws.cell(row, 2).value
+            model = ws.cell(row, 3).value
+            qty = ws.cell(row, 4).value
+            unit_price = ws.cell(row, 6).value
+            price = ws.cell(row, 8).value
+            reward = ws.cell(row, 9).value
+            discount = ws.cell(row, 11).value
+            balance = ws.cell(row, 13).value
+            location = str(ws.cell(row, 15).value).strip()
+            operator = ws.cell(row, 17).value
+            date = date_time.date()
+            time = date_time.time()
+            info_list=[card_id,car,date_time,business,model,qty,unit_price,price,reward,discount,
+                       balance,location,operator,date,time]
+            data.setdefault(date,[])
+            if info_list[3] != "备注":
+                data[date].append(info_list)
+        #增加当日加油次数        
+        for key in data.keys():
+            for i in data[key]:
+                i.append(len(data[key]))
+        return data
+    
+    def Get_file_path(self,path):        
+        files=[]
+        for file in os.listdir(path):
+            if file.endswith(".xls"): #排除文件夹内的其它干扰文件
+                files.append(path+"\\"+file)
+        return files
+    
+    def Get_current_time(self):
+        time_stamp = time.time()  # 当前时间的时间戳
+        local_time = time.localtime(time_stamp)  #
+        str_time = time.strftime('%Y-%m-%d %H.%M.%S', local_time)
+        return str_time
+    
+    def Summary_data(self,files):
+        thin = Side(border_style="thin", color="000000")#定义边框粗细及颜色
+        title = ['部门', '部门编号', '时间', '业务类型', '品种', '数量', '单价', '金额', '额外值',
+         '调整', '剩余', '库位', '操作员', '领取日期', '领取时间', '领取次数']
+
+        wb = Workbook() 
+        ws = wb.active
+        ws.merge_cells("A1:P1")
+        ws.cell(1,1).value = "领料明细汇总表"
+        ws.cell(1,1).font = Font(name=u'黑体',bold=True,size=18)
+        ws.row_dimensions[1].height  = 22.2
+        ws.cell(1,1).alignment = Alignment(horizontal="center", vertical="center")
+        ws.append(title)
+
+        #插入数据
+        files = self.Get_file_path(self.input.text()) #获取文本编辑框中的输入文件目录，并获取目录下的xls文件
+        for file in files:
+            data = self.Get_data(file)
+            for key in data.keys():
+                for i in data[key]:
+                    ws.append(i)
+            f = QtWidgets.QListWidgetItem(f"{file} 的内容已加入总表.") # 创建一个显示项
+            self.show_result.addItem(f) # 将结果添加到部件中
+
+        #设置字号，对齐，缩小字体填充，加边框
+        #Font(bold=True)可加粗字体
+        for row_number in range(2, ws.max_row+1):
+            for col_number in range(1,17):
+                c = ws.cell(row=row_number,column=col_number)
+                c.font = Font(size=9)
+                c.border = Border(top=thin, left=thin, right=thin, bottom=thin)
+                c.alignment = Alignment(horizontal="left", vertical="center")
+
+        col_name= list("ABCDEFGHIJKLMNOP")
+        col_width = [8, 8, 16, 8, 16, 8, 8, 9.8, 8, 8, 8, 11, 8.3, 9, 8, 8]
+        for i in range(len(col_name)):
+            ws.column_dimensions[col_name[i]].width = col_width[i]
+
+        ws.column_dimensions.group('I','K',hidden=True)
+        ws.column_dimensions.group('N','O',hidden=True)
+
+        wb.save(f"{self.output.text()}\\领料明细汇总表{self.Get_current_time()}.xlsx")
+        f = QtWidgets.QListWidgetItem(f"\n领料明细汇总表{self.Get_current_time()}.xlsx 已生成，请去输出文件夹查看.") # 创建一个显示项
+        self.show_result.addItem(f) # 将结果添加到部件中
+
+            
+def main():
+    app = QtWidgets.QApplication(sys.argv)
+    app.setWindowIcon(QIcon("PO.ico"))#设置界面左上角图标
+    gui = MainGUI()
+    gui.show()
+    sys.exit(app.exec_())
+
+
+if __name__ == '__main__':
+    main()
+
+#ppt********************************************* 提取文字#提取所有文本字符
+from pptx import Presentation
+data = []
+prs = Presentation('data\制造业必修课.pptx')
+for slide in prs.slides: #遍历每页PPT
+    for shape in slide.shapes: #遍历PPT中的每个形状
+        if shape.has_text_frame: #判断该是否包含文本，保证有文本才提取
+            for paragraph in shape.text_frame.paragraphs: #按文本框中的段落提取
+                data.append(paragraph.text) #提取一个段落的文本，就存到列表data中
+
+
+#写入文本文件
+TxtFile = open('data\制造业必修课.txt', 'w',encoding='utf-8')
+for i in data:
+    TxtFile.write(i+'\n') #写入并换行，以保证正确分段
+TxtFile.close() #保存
+
+
+#写入word文件
+import docx
+doc=docx.Document()#创建一个word文件对象
+for i in data:
+    doc.add_paragraph(i) #增加一个段落，并将列表中的一个字符串写入word文件
+doc.save('data\制造业必修课.docx')#保存
+
+#*****************************************************************************爬取快手
+# 开发作者：周哥
+# 开发时间：2021/12/03 20:33
+'''
+    统一替换
+    1.选中要替换得内容
+    2.按住Ctrl+R 注：点亮* / 2021版本一下 点亮Regex
+    3.在第一个框里输入(.*?): (.*)
+    4.在第二个框里输入'$1': '$2',
+    5.点击REPLACE ALL
+'''
+
+import json
+
+import requests
+
+url = 'https://www.kuaishou.com/graphql'
+headers = {
+    'content-type': 'application/json',
+    'Cookie': 'kpf=PC_WEB; kpn=KUAISHOU_VISION; clientid=3; did=web_ab90acfa325d8f27651fbfb06e86b69b; client_key=65890b29; userId=1896761871; kuaishou.server.web_st=ChZrdWFpc2hvdS5zZXJ2ZXIud2ViLnN0EqABpOrl6hn-yDjxsWI8YcR9hQQKLSHnaGHE_z_NV1SouxOTmq_RVG6JBmccBzskTKM0W9-S9Ztlbfbkt5p5v6a8zuzYe33UyrTdOiK5H7-Qkj14CJF-aSDraaeRzHcgr4gBRWnQZRB2yk7Ay2l9wbGZT7L9NTLfZz6EOA9Zxf1gYOyls9nzF2wjeYc7lhMz3JnnieG86VXUTKRUEnP0r2yS6BoSQ7mEvdT3xtmzMcd5yI94lmh4IiBCCDBZla0n00oTuM5QUM4Wzg8sqsgvjaSL2n-R0-68vSgFMAE; kuaishou.server.web_ph=b40dcad15e4a9db89eb88507311d3eed9b0f',
+    'Host': 'www.kuaishou.com',
+    'Origin': 'https://www.kuaishou.com',
+    'Referer': 'https://www.kuaishou.com/profile/3xv78fxycm35nn4',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.93 Safari/537.36'
+}
+
+data = {
+'operationName': "visionProfilePhotoList",
+'query': "query visionProfilePhotoList($pcursor: String, $userId: String, $page: String, $webPageArea: String) {\n  visionProfilePhotoList(pcursor: $pcursor, userId: $userId, page: $page, webPageArea: $webPageArea) {\n    result\n    llsid\n    webPageArea\n    feeds {\n      type\n      author {\n        id\n        name\n        following\n        headerUrl\n        headerUrls {\n          cdn\n          url\n          __typename\n        }\n        __typename\n      }\n      tags {\n        type\n        name\n        __typename\n      }\n      photo {\n        id\n        duration\n        caption\n        likeCount\n        realLikeCount\n        coverUrl\n        coverUrls {\n          cdn\n          url\n          __typename\n        }\n        photoUrls {\n          cdn\n          url\n          __typename\n        }\n        photoUrl\n        liked\n        timestamp\n        expTag\n        animatedCoverUrl\n        stereoType\n        videoRatio\n        profileUserTopPhoto\n        __typename\n      }\n      canAddComment\n      currentPcursor\n      llsid\n      status\n      __typename\n    }\n    hostName\n    pcursor\n    __typename\n  }\n}\n",
+'variables': {'userId': "3xv78fxycm35nn4", 'pcursor': "", 'page': "profile"}
+
+}
+data = json.dumps(data)
+response = requests.post(url=url,headers=headers,data=data)
+# print(response.json())
+json_data = response.json()
+# 解析数据
+feeds = json_data['data']['visionProfilePhotoList']['feeds']
+for feed in feeds:
+    caption = feed['photo']['caption']
+    video_url = feed['photo']['photoUrl']
+    # 发送请求，请求每个视频的地址
+    video_data = requests.get(video_url).content
+    with open(f'video\\{caption}.mp4',mode='wb') as f:
+        f.write(video_data)
+    print(caption,'下载成功')
