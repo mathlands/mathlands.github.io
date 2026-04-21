@@ -1,0 +1,811 @@
+baidumap.py**************************************
+
+import requests
+from lxml import etree
+import csv
+import json
+
+# address = '上海'
+# par = {'address': address, 'key': 'cb649a25c1f81c1451adbeca73623251'}
+# base = 'http://restapi.amap.com/v3/geocode/geo'
+# response = requests.get(base, par)
+# print(response.text)
+
+fp = open('C://Users/LP/Desktop/map.csv','wt',newline='',encoding='utf-8')
+writer = csv.writer(fp)
+writer.writerow(('address','longitude','latitude'))
+
+headers = {
+    'User-Agent':'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.143 Safari/537.36'
+}
+
+def get_user_url(url):
+    url_part = 'http://www.qiushibaike.com'
+    res = requests.get(url,headers=headers)
+    selector = etree.HTML(res.text)
+    url_infos = selector.xpath('//div[@class="article block untagged mb15"]')
+    for url_info in url_infos:
+        user_part_urls = url_info.xpath('div[1]/a[1]/@href')
+        if len(user_part_urls) == 1:
+            user_part_url = user_part_urls[0]
+            get_user_address(url_part + user_part_url)
+        else:
+            pass
+
+def get_user_address(url):
+    res = requests.get(url, headers=headers)
+    selector = etree.HTML(res.text)
+    if selector.xpath('//div[2]/div[3]/div[2]/ul/li[4]/text()'):
+        address = selector.xpath('//div[2]/div[3]/div[2]/ul/li[4]/text()')
+        get_geo(address[0].split(' · ')[0])
+    else:
+        pass
+
+def get_geo(address):
+    par = {'address': address, 'key': 'cb649a25c1f81c1451adbeca73623251'}
+    api = 'http://restapi.amap.com/v3/geocode/geo'
+    res = requests.get(api, par)
+    json_data = json.loads(res.text)
+    try:
+        geo = json_data['geocodes'][0]['location']
+        longitude = geo.split(',')[0]
+        latitude = geo.split(',')[1]
+        writer.writerow((address,longitude,latitude))
+    except IndexError:
+        pass
+
+if __name__ == '__main__':
+    urls = ['http://www.qiushibaike.com/text/page/{}/'.format(str(i)) for i in range(1, 36)]
+    for url in urls:
+        get_user_url(url)
+
+
+*********************************************************************
+compare.py
+
+import requests
+import re
+from bs4 import BeautifulSoup
+from lxml import etree
+import time
+
+headers = {
+    'User-Agent':'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.143 Safari/537.36'
+}
+
+urls = ['http://www.qiushibaike.com/text/page/{}/'.format(str(i)) for i in range(1,36)]
+
+def re_scraper(url):
+    res = requests.get(url,headers=headers)
+    ids = re.findall('<h2>(.*?)</h2>',res.text,re.S)
+    contents = re.findall('<div class="content">.*?<span>(.*?)</span>',res.text,re.S)
+    laughs = re.findall('<span class="stats-vote"><i class="number">(\d+)</i>',res.text,re.S)
+    comments = re.findall('<i class="number">(\d+)</i> 评论',res.text,re.S)
+    for id,content,laugh,comment in zip(ids,contents,laughs,comments):
+        info = {
+            'id':id,
+            'content':content,
+            'laugh':laugh,
+            'comment':comment
+        }
+        return info
+
+def bs_scraper(url):
+    res = requests.get(url, headers=headers)
+    soup = BeautifulSoup(res.text,'lxml')
+    ids = soup.select('a > h2')
+    contents = soup.select('div > span')
+    laughs = soup.select('span.stats-vote > i')
+    comments = soup.select('i.number')
+    for id,content,laugh,comment in zip(ids,contents,laughs,comments):
+        info = {
+            'id':id.get_text(),
+            'content':content.get_text(),
+            'laugh':laugh.get_text(),
+            'comment':comment.get_text()
+        }
+        return info
+
+def lxml_scraper(url):
+    res = requests.get(url, headers=headers)
+    selector = etree.HTML(res.text)
+    url_infos = selector.xpath('//div[@class="article block untagged mb15"]')
+    try:
+        for url_info in url_infos:
+            id = url_info.xpath('div[1]/a[2]/h2/text()')[0]
+            content = url_info.xpath('a[1]/div/span/text()')[0]
+            laugh = url_info.xpath('div[2]/span[1]/i/text()')[0]
+            comment = url_info.xpath('div[2]/span[2]/a/i/text()')[0]
+            info = {
+                'id':id,
+                'content':content,
+                'laugh':laugh,
+                'comment':comment
+            }
+            return info
+    except IndexError:
+        pass
+
+if __name__ == '__main__':
+    for name,scraper in [('Regular expressions',re_scraper),('BeautifulSoup',bs_scraper),('Lxml',lxml_scraper)]:
+        start = time.time()
+        for url in urls:
+            scraper(url)
+        end = time.time()
+        print(name,end-start)
+
+
+***************************************************************************************************************
+doubanbook.py
+
+from lxml import etree
+import requests
+import csv
+
+fp = open('C://Users/LP/Desktop/doubanbook.csv','wt',newline='',encoding='utf-8')
+writer = csv.writer(fp)
+writer.writerow(('name', 'url',  'author', 'publisher', 'date', 'price', 'rate', 'comment'))
+
+urls = ['https://book.douban.com/top250?start={}'.format(str(i)) for i in range(0,250,25)]
+
+headers = {
+    'User-Agent':'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/55.0.2883.87 Safari/537.36'
+}
+
+for url in urls:
+    html = requests.get(url,headers=headers)
+    selector = etree.HTML(html.text)
+    infos = selector.xpath('//tr[@class="item"]')
+    for info in infos:
+        name = info.xpath('td/div/a/@title')[0]
+        url = info.xpath('td/div/a/@href')[0]
+        book_infos = info.xpath('td/p/text()')[0]
+        author = book_infos.split('/')[0]
+        publisher = book_infos.split('/')[-3]
+        date = book_infos.split('/')[-2]
+        price = book_infos.split('/')[-1]
+        rate = info.xpath('td/div/span[2]/text()')[0]
+        comments = info.xpath('td/p/span/text()')
+        comment = comments[0] if len(comments) != 0 else "空"
+        writer.writerow((name,url,author,publisher,date,price,rate,comment))
+
+fp.close()
+
+***********************************************************
+doubanmovie.py
+
+import requests
+from lxml import etree
+import re
+import pymysql
+import time
+
+conn = pymysql.connect(host='localhost', user='root', passwd='123456', db='mydb', port=3306, charset='utf8')
+cursor = conn.cursor()
+
+headers = {
+    'User-Agent':'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36'
+}
+
+def get_movie_url(url):
+    html = requests.get(url,headers=headers)
+    selector = etree.HTML(html.text)
+    movie_hrefs = selector.xpath('//div[@class="hd"]/a/@href')
+    for movie_href in movie_hrefs:
+        get_movie_info(movie_href)
+
+def get_movie_info(url):
+    html = requests.get(url,headers=headers)
+    selector = etree.HTML(html.text)
+    try:
+        name = selector.xpath('//*[@id="content"]/h1/span[1]/text()')[0]
+        director = selector.xpath('//*[@id="info"]/span[1]/span[2]/a/text()')[0]
+        actors = selector.xpath('//*[@id="info"]/span[3]/span[2]')[0]
+        actor = actors.xpath('string(.)')
+        style = re.findall('<span property="v:genre">(.*?)</span>',html.text,re.S)[0]
+        country = re.findall('<span class="pl">制片国家/地区:</span> (.*?)<br/>',html.text,re.S)[0]
+        release_time = re.findall('上映日期:</span>.*?>(.*?)</span>',html.text,re.S)[0]
+        time = re.findall('片长:</span>.*?>(.*?)</span>',html.text,re.S)[0]
+        score = selector.xpath('//*[@id="interest_sectl"]/div[1]/div[2]/strong/text()')[0]
+        cursor.execute(
+            "insert into doubanmovie (name,director,actor,style,country,release_time,time,score) values(%s,%s,%s,%s,%s,%s,%s,%s)",
+            (str(name), str(director), str(actor), str(style), str(country), str(release_time), str(time), str(score)))
+
+    except IndexError:
+        pass
+
+if __name__ == '__main__':
+    urls = ['https://movie.douban.com/top250?start={}'.format(str(i)) for i in range(0, 250, 25)]
+    for url in urls:
+        get_movie_url(url)
+        time.sleep(2)
+    conn.commit()
+
+*****************************************************************************************************
+doubanmusic.py
+
+import requests
+from lxml import etree
+import re
+import pymongo
+import time
+
+client = pymongo.MongoClient('localhost', 27017)
+mydb = client['mydb']
+musictop = mydb['musictop']
+
+headers = {
+    'User-Agent':'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/55.0.2883.87 Safari/537.36'
+}
+
+def get_url_music(url):
+    html = requests.get(url,headers=headers)
+    selector = etree.HTML(html.text)
+    music_hrefs = selector.xpath('//a[@class="nbg"]/@href')
+    for music_href in music_hrefs:
+        get_music_info(music_href)
+
+def get_music_info(url):
+    html = requests.get(url,headers=headers)
+    selector = etree.HTML(html.text)
+    name = selector.xpath('//*[@id="wrapper"]/h1/span/text()')[0]
+    # author = selector.xpath('//*[@id="info"]/span[1]/span/a/text()')
+    author = re.findall('表演者:.*?>(.*?)</a>',html.text,re.S)[0]
+    styles = re.findall('<span class="pl">流派:</span>&nbsp;(.*?)<br />',html.text,re.S)
+    if len(styles) == 0:
+        style = '未知'
+    else:
+        style = styles[0].strip()
+    time = re.findall('发行时间:</span>&nbsp;(.*?)<br />',html.text,re.S)[0].strip()
+    publishers = re.findall('出版者:.*?>(.*?)</a>',html.text,re.S)
+    if len(publishers) == 0:
+        publisher = '未知'
+    else:
+        publisher = publishers[0].strip()
+    score = selector.xpath('//*[@id="interest_sectl"]/div/div[2]/strong/text()')[0]
+    print(name,author,style,time,publisher,score)
+    info = {
+        'name':name,
+        'author':author,
+        'style':style,
+        'time':time,
+        'publisher':publisher,
+        'score':score
+    }
+    musictop.insert_one(info)
+
+if __name__ == '__main__':
+    urls = ['https://music.douban.com/top250?start={}'.format(str(i)) for i in range(0,250,25)]
+    for url in urls:
+        get_url_music(url)
+        time.sleep(2)
+
+*************************************************************************************
+doupo_xiaoshuo.py
+
+import requests
+import re
+import time
+
+headers = {
+    'User-Agent':'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36'
+}
+
+f = open('C:/Users/LP/Desktop/doupo.txt','a+')
+
+def get_info(url):
+    res = requests.get(url,headers=headers)
+    if res.status_code == 200:
+        contents = re.findall('<p>(.*?)</p>',res.content.decode('utf-8'),re.S)
+        for content in contents:
+            f.write(content+'\n')
+    else:
+        pass
+
+if __name__ == '__main__':
+    urls = ['http://www.doupoxs.com/doupocangqiong/{}.html'.format(str(i)) for i in range(2,1665)]
+    for url in urls:
+        get_info(url)
+        time.sleep(1)
+    f.close()
+
+***********************************************************************************
+jianshu_sevenday.py
+
+from lxml import etree
+import requests
+import pymongo
+import re
+import json
+from multiprocessing import Pool
+
+client = pymongo.MongoClient('localhost', 27017)
+mydb = client['mydb']
+sevenday = mydb['sevenday']
+
+header = {
+    'User-Agent':'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/55.0.2883.87 Safari/537.36'
+}
+
+def get_url(url):
+    html = requests.get(url,headers=header)
+    selector = etree.HTML(html.text)
+    infos = selector.xpath('//ul[@class="note-list"]/li')
+    for info in infos:
+        article_url_part = info.xpath('div/a/@href')[0]
+        get_info(article_url_part)
+
+def get_info(url):
+    article_url = 'http://www.jianshu.com/' + url
+    html = requests.get(article_url,headers=header)
+    selector = etree.HTML(html.text)
+    author = selector.xpath('//span[@class="name"]/a/text()')[0]
+    article = selector.xpath('//h1[@class="title"]/text()')[0]
+    date = selector.xpath('//span[@class="publish-time"]/text()')[0]
+    word = selector.xpath('//span[@class="wordage"]/text()')[0]
+    view = re.findall('"views_count":(.*?),',html.text,re.S)[0]
+    comment = re.findall('"comments_count":(.*?),',html.text,re.S)[0]
+    like = re.findall('"likes_count":(.*?),',html.text,re.S)[0]
+    id = re.findall('{"id":(.*?),',html.text,re.S)[0]
+    gain_url = 'http://www.jianshu.com/notes/{}/rewards?count=20'.format(id)
+    wb_data = requests.get(gain_url,headers=header)
+    json_data = json.loads(wb_data.text)
+    gain = json_data['rewards_count']
+
+    include_list = []
+    include_urls = ['http://www.jianshu.com/notes/{}/included_collections?page={}'.format(id,str(i)) for i in range(1,10)]
+    for include_url in include_urls:
+        html = requests.get(include_url,headers=header)
+        json_data = json.loads(html.text)
+        includes = json_data['collections']
+        if len(includes) == 0:
+            pass
+        else:
+            for include in includes:
+                include_title = include['title']
+                include_list.append(include_title)
+    info ={
+        'author':author,
+        'article':article,
+        'date':date,
+        'word':word,
+        'view':view,
+        'comment':comment,
+        'like':like,
+        'gain':gain,
+        'include':include_list
+    }
+    sevenday.insert_one(info)
+
+if __name__ == '__main__':
+    urls = ['http://www.jianshu.com/trending/weekly?page={}'.format(str(i)) for i in range(0, 11)]
+    pool = Pool(processes=4)
+    pool.map(get_url,urls)
+
+*********************************************************
+jianshu_shouye.py
+
+import requests
+from lxml import etree
+import pymongo
+from multiprocessing import Pool
+
+client = pymongo.MongoClient('localhost', 27017)
+mydb = client['mydb']
+jianshu_shouye = mydb['jianshu_shouye']
+
+def get_jianshu_info(url):
+    html = requests.get(url)
+    selector = etree.HTML(html.text)
+    infos = selector.xpath('//ul[@class="note-list"]/li')
+    for info in infos:
+        try:
+            author = info.xpath('div/div[1]/div/a/text()')[0]
+            time = info.xpath('div/div[1]/div/span/@data-shared-at')[0]
+            title = info.xpath('div/a/text()')[0]
+            content = info.xpath('div/p/text()')[0].strip()
+            view = info.xpath('div/div[2]/a[1]/text()')[1].strip()
+            comment = info.xpath('div/div[2]/a[2]/text()')[1].strip()
+            like = info.xpath('div/div[2]/span[1]/text()')[0].strip()
+            rewards = info.xpath('div/div[2]/span[2]/text()')
+            if len(rewards) == 0:
+                reward = '无'
+            else:
+                reward = rewards[0].strip()
+            data = {
+                'author':author,
+                'time':time,
+                'title':title,
+                'content':content,
+                'view':view,
+                'comment':comment,
+                'like':like,
+                'reward':reward
+            }
+            jianshu_shouye.insert_one(data)
+        except IndexError:
+            pass
+
+if __name__ == '__main__':
+    urls = ['http://www.jianshu.com/c/bDHhpK?order_by=commented_at&page={}'.format(str(i)) for i in range(1,10001)]
+    pool = Pool(processes=4)
+    pool.map(get_jianshu_info, urls)
+
+
+***********************************************************************************************************************
+jieba_doupo.py
+
+import jieba.analyse
+path = 'C:/Users/LP/Desktop/doupo.txt'
+fp = open(path,'r')
+content = fp.read()
+try:
+    jieba.analyse.set_stop_words('H:\最近用（笔记本）\python\中文停用词表.txt')
+    tags = jieba.analyse.extract_tags(content, topK=50, withWeight=True)
+    for item in tags:
+        print(item[0]+'\t'+str(int(item[1]*1000)))
+finally:
+    fp.close()
+
+******************************************************************************************************************
+jiebao_weibo.py
+
+import jieba.analyse
+path = 'C:/Users/LP/Desktop/weibo.txt'
+fp = open(path,'r',encoding='utf-8')
+content = fp.read()
+try:
+    jieba.analyse.set_stop_words('H:\最近用（笔记本）\python\中文停用词表.txt')
+    tags = jieba.analyse.extract_tags(content, topK=100, withWeight=True)
+    for item in tags:
+        print(item[0]+'\t'+str(int(item[1]*1000)))
+finally:
+    fp.close()
+
+*************************************************************************************************************
+kugou.py
+
+import requests
+from bs4 import BeautifulSoup
+import time
+
+headers = {
+    'User-Agent':'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36'
+}
+
+def get_info(url):
+    wb_data = requests.get(url,headers=headers)
+    soup = BeautifulSoup(wb_data.text,'lxml')
+    ranks = soup.select('span.pc_temp_num')
+    titles = soup.select('div.pc_temp_songlist > ul > li > a')
+    times = soup.select('span.pc_temp_tips_r > span')
+    for rank,title,time in zip(ranks,titles,times):
+        data = {
+            'rank':rank.get_text().strip(),
+            'singer':title.get_text().split('-')[0],
+            'song':title.get_text().split('-')[0],
+            'time':time.get_text().strip()
+        }
+        print(data)
+
+if __name__ == '__main__':
+    urls = ['http://www.kugou.com/yy/rank/home/{}-8888.html'.format(str(i)) for i in range(1,24)]
+    for url in urls:
+        get_info(url)
+        time.sleep(1)
+
+
+*****************************************************************************************************************
+meizitu.py
+
+import requests
+from bs4 import BeautifulSoup
+from urllib.request import urlretrieve
+dowmload_links = []
+path = 'C://Users/LP/Desktop/photo/'
+url = 'http://www.mzitu.com/'
+res = requests.get(url)
+soup = BeautifulSoup(res.text,'lxml')
+imgs = soup.select('li > a > img')
+for img in imgs:
+    print(img.get('data-original'))
+    dowmload_links.append(img.get('data-original'))
+for item in dowmload_links:
+    urlretrieve(item,path+item[-10:])
+
+*******************************************************************
+pexels.py
+from bs4 import BeautifulSoup
+import requests
+import json
+
+headers ={
+    'accept':'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+    'User-Agent':'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.143 Safari/537.36'
+}
+
+url_path = 'https://www.pexels.com/search/'
+word= input('请输入你要下载的图片：')
+url_tra ='http://howtospeak.org:443/api/e2c?user_key=dfcacb6404295f9ed9e430f67b641a8e &notrans=0&text=' + word
+english_data = requests.get(url_tra)
+js_data = json.loads(english_data.text)
+content = js_data['english']
+url = url_path + content + '/'
+wb_data = requests.get(url,headers=headers)
+soup = BeautifulSoup(wb_data.text,'lxml')
+imgs = soup.select('article > a > img')
+list = []
+for img in imgs:
+    photo = img.get('src')
+    list.append(photo)
+
+path = 'C://Users/LP/Desktop/photo/'
+
+for item in list:
+        data = requests.get(item,headers=headers)
+        fp = open(path+item.split('?')[0][-10:],'wb')
+        fp.write(data.content)
+        fp.close()
+        # print(item)
+
+*******************************************************************************************************
+qidian_xiaoshuo.py
+
+import xlwt
+import requests
+from lxml import etree
+import time
+
+all_info_list = []
+
+def get_info(url):
+    html = requests.get(url)
+    selector = etree.HTML(html.text)
+    infos = selector.xpath('//ul[@class="all-img-list cf"]/li')
+    for info in infos:
+        title = info.xpath('div[2]/h4/a/text()')[0]
+        author = info.xpath('div[2]/p[1]/a[1]/text()')[0]
+        style_1 = info.xpath('div[2]/p[1]/a[2]/text()')[0]
+        style_2 = info.xpath('div[2]/p[1]/a[3]/text()')[0]
+        style = style_1+'·'+style_2
+        complete = info.xpath('div[2]/p[1]/span/text()')[0]
+        introduce = info.xpath('div[2]/p[2]/text()')[0].strip()
+        word = info.xpath('div[2]/p[3]/span/text()')[0].strip('万字')
+        info_list = [title,author,style,complete,introduce,word]
+        all_info_list.append(info_list)
+    time.sleep(1)
+
+if __name__ == '__main__':
+    urls = ['http://a.qidian.com/?page={}'.format(str(i)) for i in range(1,101)]
+    for url in urls:
+        get_info(url)
+    header = ['title','author','style','complete','introduce','word']
+    book = xlwt.Workbook(encoding='utf-8')
+    sheet = book.add_sheet('Sheet1')
+    for h in range(len(header)):
+        sheet.write(0, h, header[h])
+    i = 1
+    for list in all_info_list:
+        j = 0
+        for data in list:
+            sheet.write(i, j, data)
+            j += 1
+        i += 1
+    book.save('xiaoshuo.xls')
+
+*******************************************************************************
+qiushibaike.py
+
+import requests
+import re
+
+headers = {
+    'User-Agent':'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.143 Safari/537.36'
+}
+
+info_lists = []
+
+def judgment_sex(class_name):
+  if class_name == 'womenIcon':
+      return '女'
+  else:
+      return  '男'
+
+def get_info(url):
+    res = requests.get(url)
+    ids = re.findall('<h2>(.*?)</h2>',res.text,re.S)
+    levels = re.findall('<div class="articleGender \D+Icon">(.*?)</div>',res.text,re.S)
+    sexs = re.findall('<div class="articleGender (.*?)">',res.text,re.S)
+    contents = re.findall('<div class="content">.*?<span>(.*?)</span>',res.text,re.S)
+    laughs = re.findall('<span class="stats-vote"><i class="number">(\d+)</i>',res.text,re.S)
+    comments = re.findall('<i class="number">(\d+)</i> 评论',res.text,re.S)
+    for id,level,sex,content,laugh,comment in zip(ids,levels,sexs,contents,laughs,comments):
+        info = {
+            'id':id,
+            'level':level,
+            'sex':judgment_sex(sex),
+            'content':content,
+            'laugh':laugh,
+            'comment':comment
+        }
+        info_lists.append(info)
+
+if __name__ == '__main__':
+    urls = ['http://www.qiushibaike.com/text/page/{}/'.format(str(i)) for i in range(1,36)]
+    for url in urls:
+        get_info(url)
+    for info_list in info_lists:
+        # f = open('C:/Users/Administrator//Desktop/qiushi.text','a+')
+        # try:
+        #     f.write(info_list['id']+'\n')
+        #     f.write(info_list['level'] + '\n')
+        #     f.write(info_list['sex'] + '\n')
+        #     f.write(info_list['content'] + '\n')
+        #     f.write(info_list['laugh'] + '\n')
+        #     f.write(info_list['comment'] + '\n\n')
+        #     f.close()
+        # except UnicodeEncodeError:
+        #     pass
+        print(info_list)
+
+************************************************************************************************************************
+qq_kongjian.py
+
+from selenium import webdriver
+import time
+import csv
+import pymongo
+
+client = pymongo.MongoClient('localhost', 27017)
+mydb = client['mydb']
+qq_shuo = mydb['qq_shuo']
+
+driver = webdriver.PhantomJS()
+driver.maximize_window()
+
+def get_info(qq):
+    driver.get('http://user.qzone.qq.com/{}/311'.format(qq))
+    driver.implicitly_wait(10)
+    try:
+        driver.find_element_by_id('login_div')
+        a = True
+    except:
+        a = False
+    if a == True:
+        driver.switch_to.frame('login_frame')
+        driver.find_element_by_id('switcher_plogin').click()
+        driver.find_element_by_id('u').clear()
+        driver.find_element_by_id('u').send_keys('账号')
+        driver.find_element_by_id('p').clear()
+        driver.find_element_by_id('p').send_keys('密码')
+        driver.find_element_by_id('login_button').click()
+        time.sleep(3)
+    driver.implicitly_wait(3)
+    try:
+        driver.find_element_by_id('QM_OwnerInfo_Icon')
+        b = True
+    except:
+        b = False
+    if b == True:
+        driver.switch_to.frame('app_canvas_frame')
+        contents = driver.find_elements_by_css_selector('.content')
+        times = driver.find_elements_by_css_selector('.c_tx.c_tx3.goDetail')
+        for content, tim in zip(contents, times):
+            data = {
+                'time': tim.text,
+                'content': content.text
+            }
+            qq_shuo.insert_one(data)
+
+if __name__ == '__main__':
+    qq_lists = []
+    fp = open('C:/Users/LP/Desktop/QQmail.csv')
+    reader = csv.DictReader(fp)
+    for row in reader:
+        qq_lists.append(row['电子邮件'].split('@')[0])
+    fp.close()
+    for item in qq_lists:
+        get_info(item)
+
+
+*********************************************************************************************
+
+qq_pic.py
+import requests
+from selenium import webdriver
+
+headers = {
+    'Cookies':'eas_sid=O1241829N3g2m1A8g4u8A2e1z6; LW_uid=M1B4a8m90352T1l9X6Z6b745p8; tvfe_boss_uuid=8084c25d7b0a1268; LW_sid=H1P479s0S522G1c9T0N530x4S4; pgv_pvi=3277686784; RK=ScHfZyUfW3; ptui_loginuin=799407181; pgv_si=s1991670784; _qpsvr_localtk=0.34491608251486205; ptcz=0c21579596a77cfff79a34ed2fe1743bcfbed7eb2da5d69867b7fc3ff51f0650; ts_last=web2.qq.com/; ts_refer=www.baidu.com/link; ts_uid=8163489048; ptisp=ctc; pt2gguin=o0799407181; uin=o0799407181; skey=@Ck3bWtJK6; p_uin=o0799407181; p_skey=FcR8o2ep*OXn2qW7ZHXRiRQq1Ju2ZOgqwjoa-dv1u3E_; pt4_token=rhl0MbJ31YUteqdB7BapbpxUlpUMSupWoEPgnGu83Js_; pgv_info=ssid=s8304333587; pgv_pvid=5447523008; o_cookie=799407181; ptwebqq=494fdca172f1d89c1b539b0d419c26d97f9253897e205eb605db88c38b1d1c57',
+    'User-Agent':'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36'
+}
+html = requests.get('http://w.qq.com/',headers=headers)
+driver = webdriver.PhantomJS()
+driver.get('http://w.qq.com/')
+print(driver.page_source)
+
+**************************************************************************************
+weibo.py
+import requests
+import json
+
+headers = {
+    'Cookie':'_T_WM=96cb9ea775b44e6b748bad0632f08acf; ALF=1495261239; SCF=Ao2eEoFhjA5KbdNGqJHI9wEAM9KNrdONmtRBf3Azk4hY6cCXAOtoHK9p0qyo0s52_K7c7o2uOMLHjyOZxQyCfGY.; SUB=_2A251_CMeDeRhGeNM41oV-S_MzDSIHXVXH01WrDV6PUJbktANLVTfkW0YD5snD7uLxDFvKP-bEw7LXp6MdA..; SUBP=0033WrSXqPxfM725Ws9jqgMF55529P9D9WWYIHB5wH.nYVf7IYKTS.SD5JpX5o2p5NHD95QfeonRSh.pehMRWs4DqcjrK.yhi--Xi-zRi-isi--Ni-2ci-iFi--fiKLsiKy8i--ci-2Ei-2c; SUHB=0h1JEFS6Kw-9oj; SSOLoginState=1492669262; H5_INDEX=0_friend; H5_INDEX_TITLE=%E5%A5%BD%E5%8F%8B%E5%9C%88%20; M_WEIBOCN_PARAMS=luicode%3D20000174%26uicode%3D20000174',
+    'User_Agent':'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36'
+}
+
+f = open('C:/Users/LP/Desktop/weibo.txt','a+',encoding='utf-8')
+
+def get_info(url,page):
+    html = requests.get(url,headers=headers)
+    json_data = json.loads(html.text)
+    card_groups = json_data[0]['card_group']
+    for card_group in card_groups:
+        f.write(card_group['mblog']['text'].split(' ')[0]+'\n')
+
+    next_cursor = json_data[0]['next_cursor']
+
+    if page<50:
+        next_url = 'https://m.weibo.cn/index/friends?format=cards&next_cursor='+str(next_cursor)+'&page=1'
+        page = page + 1
+        get_info(next_url,page)
+    else:
+        pass
+        f.close()
+
+if __name__ == '__main__':
+    url = 'https://m.weibo.cn/index/friends?format=cards'
+    get_info(url,1)
+
+
+***********************************************************************************
+xiaozhuduanzhu.py
+
+from bs4 import BeautifulSoup
+import requests
+import time
+
+headers = {
+    'User-Agent':'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.143 Safari/537.36'
+}
+
+def judgment_sex(class_name):
+  if class_name == ['member_ico1']:
+      return '女'
+  else:
+      return  '男'
+
+def get_links(url):
+    wb_data = requests.get(url,headers=headers)
+    soup = BeautifulSoup(wb_data.text,'lxml')
+    links = soup.select('#page_list > ul > li > a')
+    for link in links:
+        href = link.get("href")
+        get_info(href)
+
+def get_info(url):
+    wb_data = requests.get(url,headers=headers)
+    soup = BeautifulSoup(wb_data.text,'lxml')
+    tittles = soup.select('div.pho_info > h4')
+    addresses = soup.select('span.pr5')
+    prices = soup.select('#pricePart > div.day_l > span')
+    imgs = soup.select('#floatRightBox > div.js_box.clearfix > div.member_pic > a > img')
+    names = soup.select('#floatRightBox > div.js_box.clearfix > div.w_240 > h6 > a')
+    sexs = soup.select('#floatRightBox > div.js_box.clearfix > div.member_pic > div')
+    for tittle, address, price, img, name, sex in zip(tittles,addresses,prices,imgs,names,sexs):
+        data = {
+            'tittle':tittle.get_text().strip(),
+            'address':address.get_text().strip(),
+            'price':price.get_text(),
+            'img':img.get("src"),
+            'name':name.get_text(),
+            'sex':judgment_sex(sex.get("class"))
+        }
+        print(data)
+
+if __name__ == '__main__':
+    urls = ['http://bj.xiaozhu.com/search-duanzufang-p{}-0/'.format(number) for number in range(1,14)]
+    for single_url in urls:
+        get_links(single_url)
+        time.sleep(2)
+
+
